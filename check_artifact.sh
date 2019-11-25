@@ -38,5 +38,9 @@ else
     exit 2
 fi
 
+# Script full path. The following is taken from
+# https://stackoverflow.com/questions/4774054/reliable-way-for-a-bash-script-to-get-the-full-path-to-itself/4774063
+SCRIPT_PATH="$( cd $(dirname $0) ; pwd -P )"
+
 # Check metadata
-./check_metadata.sh $DOCKER_IMAGE
+$SCRIPT_PATH/check_metadata.sh $DOCKER_IMAGE
