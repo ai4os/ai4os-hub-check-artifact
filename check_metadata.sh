@@ -89,8 +89,10 @@ fi
 
 
 # Trying to access the deployment
-c_url="http://localhost:${HOST_PORT}/models/"
-c_args_h1="Accept: application/json"
+c_url=""
+c_url_v1="http://localhost:${HOST_PORT}/models/"
+c_url_v2="http://localhost:${HOST_PORT}/v2/models/"
+c_args_h="Accept: application/json"
 
 max_try=10     # max number of tries to access DEEPaaS API
 itry=1         # initial try number
@@ -98,15 +100,27 @@ running=false
 
 while [ "$running" == false ] && [ $itry -lt $max_try ];
 do
-   curl_call=$(curl -s -X GET $c_url -H "$c_args_h")
+   sleep 10
+   # try as DEEP API V1
+   curl_call=$(curl -s -X GET $c_url_v1 -H "$c_args_h")
    if (echo $curl_call | grep -q 'id\":') then
-       echo "[INFO] Service is responding (tries = $itry)"
+       echo "[INFO] Service is responding as API V1 (tries = $itry)"
        running=true
+       c_url=$c_url_v1
    else
-       echo "[INFO] Service is NOT (yet) responding. Try #"$itry
-       sleep 10
-       let itry=itry+1
+       echo "[INFO] Service is NOT (yet) responding as API V1. Try #"$itry
    fi
+
+   # try as DEEP API V2
+   curl_call=$(curl -s -X GET $c_url_v2 -H "$c_args_h")
+   if (echo $curl_call | grep -q 'id\":') then
+       echo "[INFO] Service is responding as API V2 (tries = $itry)"
+       running=true
+       c_url=$c_url_v2
+   else
+       echo "[INFO] Service is NOT (yet) responding as API V2. Try #"$itry
+   fi
+   let itry=itry+1
 done
 
 # If could not access the deployment, delete the container and exit
