@@ -90,6 +90,7 @@ fi
 
 # Trying to access the deployment
 c_url=""
+api_ver=""
 c_url_v1="http://localhost:${HOST_PORT}/models/"
 c_url_v2="http://localhost:${HOST_PORT}/v2/models/"
 c_args_h="Accept: application/json"
@@ -107,8 +108,9 @@ do
        echo "[INFO] Service is responding as API V1 (tries = $itry)"
        running=true
        c_url=$c_url_v1
+       api_ver="V1"
    else
-       echo "[INFO] Service is NOT (yet) responding as API V1. Try #"$itry
+       echo "[INFO] Service is NOT responding as API V1. Try #"$itry
    fi
 
    # try as DEEP API V2
@@ -117,8 +119,9 @@ do
        echo "[INFO] Service is responding as API V2 (tries = $itry)"
        running=true
        c_url=$c_url_v2
+       api_ver="V2"
    else
-       echo "[INFO] Service is NOT (yet) responding as API V2. Try #"$itry
+       echo "[INFO] Service is NOT responding as API V2. Try #"$itry
    fi
    let itry=itry+1
 done
@@ -156,7 +159,7 @@ if [ "$fields_ok" == false ]; then
 fi
 
 # if got here, all worked fine
-echo "[SUCCESS]: DEEPaaS API starts"
+echo "[SUCCESS]: DEEPaaS API starts, ver: ${api_ver}"
 echo "[SUCCESS]: Successfully checked for: (${META_DATA_FIELDS[*]})."
 remove_container
 echo "[SUCCESS] Finished. Exit with the code 0 (success)"
