@@ -18,7 +18,7 @@
 ### Main configuration
 # Default Docker image, can be re-defiend
 DOCKER_IMAGE=deephdc/deep-oc-generic
-META_DATA_FIELDS=("name\":" "Author\":" "License\":" "Author-email\":")
+META_DATA_FIELDS=("name\":" "author\":" "author-email\":" "license\":")
 # Container name: number of seconds since 1970 + a random number
 CONTAINER_NAME=$(date +%s)"_"$(($RANDOM))
 # DEEPaaS Port inside the container
