@@ -20,6 +20,7 @@
 DOCKER_IMAGE=deephdc/deep-oc-generic
 #META_DATA_FIELDS=("name\":" "author\":" "author-email\":" "license\":")
 META_DATA_FIELDS=("name*..:" "author*..:" "license*..:")
+FAKE_MODEL="deepaas-test"
 # Container name: number of seconds since 1970 + a random number
 CONTAINER_NAME=$(date +%s)"_"$(($RANDOM))
 # DEEPaaS Port inside the container
@@ -50,7 +51,7 @@ else
     echo "[ERROR] Wrong number of arguments provided!"
     shopt -s xpg_echo
     echo $USAGEMESSAGE
-    exit 2
+    exit 1
 fi
 
 # Start docker, let system to bind the port
@@ -85,7 +86,7 @@ if [[ $itry -ge $max_try ]]; then
     echo "======="
     echo "[ERROR] Did not bind a right HOST_PORT (tries = $itry). Exiting..."
     remove_container
-    exit 3
+    exit 1
 fi
 
 
@@ -132,7 +133,7 @@ if [[ $itry -ge $max_try ]]; then
     echo "======="
     echo "[ERROR] DEEPaaS API does not respond (tries = $itry). Exiting..."
     remove_container
-    exit 4
+    exit 1
 fi
 
 # Access the running DEEPaaS API. Check that various fields are present
@@ -151,17 +152,31 @@ do
    fi
 done
 
-echo "======="
 # If some fields are missing, print them, delete the container and exit
 if [ "$fields_ok" == false ]; then
+   echo "======="
    echo "[ERROR] The following fields are missing: (${fields_missing[*]}). Exiting..."
    remove_container
-   exit 5
+   exit 1
+fi
+
+# If FAKE_MODEL (deepaas-test) is loaded, delete the container and exit with error
+name_field=$(echo $curl_call | sed 's/,/\n/g' | grep -i "${META_DATA_FIELDS[0]}" | head -n1 | tr -d ' ')
+if (echo $name_field | grep -iq $FAKE_MODEL) then
+   echo "======="
+   echo "[ERROR] The test model (\"$FAKE_MODEL\") is detected, i.e. the true one failed to load :-( Exiting..."
+   remove_container
+   exit 1
+else
+  echo "[INFO] loaded model $name_field, i.e. not \"$FAKE_MODEL\""
 fi
 
 # if got here, all worked fine
+echo "======="
 echo "[SUCCESS]: DEEPaaS API starts, ver: ${api_ver}"
-echo "[SUCCESS]: Successfully checked for: (${META_DATA_FIELDS[*]})."
+echo "[SUCCESS]: Successfully checked for:"
+echo "+ (${META_DATA_FIELDS[*]}) are present"
+echo "+ test model \"$FAKE_MODEL\" is *not* loaded but true one"
 remove_container
 echo "[SUCCESS] Finished. Exit with the code 0 (success)"
 exit 0
