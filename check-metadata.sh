@@ -16,26 +16,13 @@
 ###
 
 ### Main configuration
-# Default Docker image, can be re-defiend
-DOCKER_IMAGE=deephdc/deep-oc-generic
 #META_DATA_FIELDS=("name\":" "author\":" "author-email\":" "license\":")
 META_DATA_FIELDS=("name*..:" "author*..:" "license*..:")
 FAKE_MODEL="deepaas-test"
-# Container name: number of seconds since 1970 + a random number
-CONTAINER_NAME=$(date +%s)"_"$(($RANDOM))
-# DEEPaaS Port inside the container
-DEEPaaS_PORT=5000
 ###
 
 ### Usage message (params can be re-defined) ###
-USAGEMESSAGE="Usage: $0 <docker_image>"
-
-# function to remove the Docker container
-function remove_container() 
-{   echo "[INFO]: Now removing ${CONTAINER_NAME} container"
-    docker stop ${CONTAINER_NAME}
-    docker rm ${CONTAINER_NAME}
-}
+USAGEMESSAGE="Usage: $0 <docker_image> <host_port>"
 
 #### Parse input ###
 arr=("$@")
@@ -44,8 +31,9 @@ if [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
     shopt -s xpg_echo
     echo $USAGEMESSAGE
     exit 1
-elif [ $# -eq 1 ]; then
+elif [ $# -eq 2 ]; then
     DOCKER_IMAGE=$1
+    HOST_PORT=$2
 else
     # Wrong number of arguments is given (!=1)
     echo "[ERROR] Wrong number of arguments provided!"
@@ -54,40 +42,7 @@ else
     exit 1
 fi
 
-# Start docker, let system to bind the port
-echo "[INFO] Starting Docker image ${DOCKER_IMAGE}"
-echo "[INFO] Container name: ${CONTAINER_NAME}"
-docker run --name ${CONTAINER_NAME} -p ${DEEPaaS_PORT} ${DOCKER_IMAGE} &
 
-HOST_PORT=""
-port_ok=false
-max_try=5     # max number of tries to get HOST_PORT
-itry=1        # initial try number
-
-sleep 10
-# Figure out which host port was binded
-while [ "$port_ok" == false ] && [ $itry -lt $max_try ];
-do
-    HOST_PORT=$(docker inspect -f '{{ (index (index .NetworkSettings.Ports "'"$DEEPaaS_PORT/tcp"'") 0).HostPort }}'  ${CONTAINER_NAME})
-    # Check that HOST_PORT is a number
-    # https://stackoverflow.com/questions/806906/how-do-i-test-if-a-variable-is-a-number-in-bash
-    if [ ! -z "${HOST_PORT##*[!0-9]*}" ]; then
-        port_ok=true
-        echo "[INFO] Bind the HOST_PORT=${HOST_PORT}"
-    else
-        echo "[INFO] Did not get a right HOST_PORT (yet). Try #"$itry
-        sleep 10
-        let itry=itry+1
-    fi
-done
-
-# If could not bind a port, delete the container and exit
-if [[ $itry -ge $max_try ]]; then
-    echo "======="
-    echo "[ERROR] Did not bind a right HOST_PORT (tries = $itry). Exiting..."
-    remove_container
-    exit 1
-fi
 
 
 # Trying to access the deployment
@@ -117,6 +72,7 @@ do
 
    # try as DEEP API V2
    curl_call=$(curl -s -X GET $c_url_v2 -H "$c_args_h")
+   #echo "[DEBUG] curl call (V2): $curl_call"
    if (echo $curl_call | grep -q 'id\":') then
        echo "[INFO] Service is responding as API V2 (tries = $itry)"
        running=true
@@ -132,7 +88,6 @@ done
 if [[ $itry -ge $max_try ]]; then
     echo "======="
     echo "[ERROR] DEEPaaS API does not respond (tries = $itry). Exiting..."
-    remove_container
     exit 1
 fi
 
@@ -156,7 +111,6 @@ done
 if [ "$fields_ok" == false ]; then
    echo "======="
    echo "[ERROR] The following fields are missing: (${fields_missing[*]}). Exiting..."
-   remove_container
    exit 1
 fi
 
@@ -165,7 +119,6 @@ name_field=$(echo $curl_call | sed 's/,/\n/g' | grep -i "${META_DATA_FIELDS[0]}"
 if (echo $name_field | grep -iq $FAKE_MODEL) then
    echo "======="
    echo "[ERROR] The test model (\"$FAKE_MODEL\") is detected, i.e. the true one failed to load :-( Exiting..."
-   remove_container
    exit 1
 else
   echo "[INFO] loaded model $name_field, i.e. not \"$FAKE_MODEL\""
@@ -173,11 +126,11 @@ fi
 
 # if got here, all worked fine
 echo "======="
-echo "[SUCCESS]: DEEPaaS API starts, ver: ${api_ver}"
-echo "[SUCCESS]: Successfully checked for:"
+echo "[OK]: DEEPaaS API starts, ver: ${api_ver}"
+echo "[OK]: Successfully checked for:"
 echo "+ (${META_DATA_FIELDS[*]}) are present"
 echo "+ test model \"$FAKE_MODEL\" is *not* loaded but true one"
-remove_container
-echo "[SUCCESS] Finished. Exit with the code 0 (success)"
+echo "[OK] Metadata check finished. Exit with the code 0 (success)"
+echo "======="
 exit 0
 
