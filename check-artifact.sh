@@ -58,14 +58,41 @@ echo "[INFO] Starting Docker image ${DOCKER_IMAGE}"
 echo "[INFO] Container name: ${CONTAINER_NAME}"
 docker run --name ${CONTAINER_NAME} -p ${CONTAINER_PORT} ${DOCKER_IMAGE} &
 
+sleep_time=10
+running_ok=false
 HOST_PORT=""
 port_ok=false
 max_try=5     # max number of tries to get HOST_PORT
 itry=1        # initial try number
 
-sleep 10
+sleep $sleep_time
+# Wait until container is running
+while [ "$running_ok" == false ] && [ $itry -le $max_try ];
+do
+    # Source - https://stackoverflow.com/a
+    # Posted by BMitch, modified by community. See post 'Timeline' for change history
+    # Retrieved 2026-01-12, License - CC BY-SA 4.0
+
+    if [ "$( docker container inspect -f '{{.State.Status}}' ${CONTAINER_NAME} )" = "running" ]; then
+        running_ok=true
+        echo "[INFO] Container ${CONTAINER_NAME} marked as running"
+    else
+        echo "[INFO] Container ${CONTAINER_NAME} is not yet running. Try #"$itry
+        sleep $sleep_time
+        let itry=itry+1
+    fi
+done
+
+# If could not run container, delete the container and exit
+if [ "$running_ok" == false ]; then
+    echo "======="
+    echo "[ERROR] Could NOT run the container ${CONTAINER_NAME} (tries = $itry). Exiting..."
+    remove_container
+    exit 1
+fi
+
 # Figure out which host port was binded
-while [ "$port_ok" == false ] && [ $itry -lt $max_try ];
+while [ "$port_ok" == false ] && [ $itry -le $max_try ];
 do
     HOST_PORT=$(docker inspect -f '{{ (index (index .NetworkSettings.Ports "'"$CONTAINER_PORT/tcp"'") 0).HostPort }}'  ${CONTAINER_NAME})
     # Check that HOST_PORT is a number
@@ -75,13 +102,13 @@ do
         echo "[INFO] Bind the HOST_PORT=${HOST_PORT}"
     else
         echo "[INFO] Did not get a right HOST_PORT (yet). Try #"$itry
-        sleep 10
+        sleep $sleep_time
         let itry=itry+1
     fi
 done
 
 # If could not bind a port, delete the container and exit
-if [[ $itry -ge $max_try ]]; then
+if [ "$port_ok" == false ]; then
     echo "======="
     echo "[ERROR] Did not bind a right HOST_PORT (tries = $itry). Exiting..."
     remove_container
@@ -94,9 +121,9 @@ max_try=5     # max number of tries to access Service
 itry=1        # initial try number
 status_srv=1  # by default failed status
 
-while [ $status_srv -gt 0 ] && [ $itry -lt $max_try ];
+while [ $status_srv -gt 0 ] && [ $itry -le $max_try ];
 do
-   sleep 10
+   sleep $sleep_time
    response=$(curl http://localhost:${HOST_PORT})
    status_srv=$?
    let itry=itry+1
