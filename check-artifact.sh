@@ -26,11 +26,21 @@ CONTAINER_PORT=5000
 ### Usage message (params can be re-defined) ###
 USAGEMESSAGE="Usage: $0 <docker_image> <container_port>"
 
+### Readiness tuning (environment variables) ###
+# Seconds between readiness polls
+CHECK_SLEEP=${CHECK_SLEEP:-10}
+# Overall readiness budget in seconds. The container start may include
+# runtime installations (e.g. `deep-start -j` pip-installing JupyterLab
+# extensions), so the service can legitimately take minutes to appear.
+CHECK_MAX_WAIT=${CHECK_MAX_WAIT:-300}
+# Local alias kept for the polling loops below
+sleep_time=${CHECK_SLEEP}
+
 # function to remove the Docker container
-function remove_container() 
+function remove_container()
 {   echo "[INFO]: Now removing ${CONTAINER_NAME} container"
-    docker stop ${CONTAINER_NAME}
-    docker rm ${CONTAINER_NAME}
+    docker stop ${CONTAINER_NAME} || true
+    docker rm ${CONTAINER_NAME} || true
 }
 
 #### Parse input ###
@@ -58,7 +68,6 @@ echo "[INFO] Starting Docker image ${DOCKER_IMAGE}"
 echo "[INFO] Container name: ${CONTAINER_NAME}"
 docker run --name ${CONTAINER_NAME} -p ${CONTAINER_PORT} ${DOCKER_IMAGE} &
 
-sleep_time=10
 running_ok=false
 HOST_PORT=""
 port_ok=false
@@ -69,10 +78,6 @@ sleep $sleep_time
 # Wait until container is running
 while [ "$running_ok" == false ] && [ $itry -le $max_try ];
 do
-    # Source - https://stackoverflow.com/a
-    # Posted by BMitch, modified by community. See post 'Timeline' for change history
-    # Retrieved 2026-01-12, License - CC BY-SA 4.0
-
     if [ "$( docker container inspect -f '{{.State.Status}}' ${CONTAINER_NAME} )" = "running" ]; then
         running_ok=true
         echo "[INFO] Container ${CONTAINER_NAME} marked as running"
@@ -92,6 +97,9 @@ if [ "$running_ok" == false ]; then
 fi
 
 # Figure out which host port was binded
+# (own try counter: not shared with the 'running' check above)
+max_try=5
+itry=1
 while [ "$port_ok" == false ] && [ $itry -le $max_try ];
 do
     HOST_PORT=$(docker inspect -f '{{ (index (index .NetworkSettings.Ports "'"$CONTAINER_PORT/tcp"'") 0).HostPort }}'  ${CONTAINER_NAME})
@@ -115,24 +123,54 @@ if [ "$port_ok" == false ]; then
     exit 1
 fi
 
-# Check that service on CONTAINER_PORT is responding
-echo "[INFO] Testing that http://localhost:${HOST_PORT} is accessible"
-max_try=5     # max number of tries to access Service
-itry=1        # initial try number
-status_srv=1  # by default failed status
+# Wait until the service on CONTAINER_PORT is ready.
+# If the image defines a HEALTHCHECK, use it as the readiness oracle
+# (it reflects the state inside the container, no host port needed).
+# Otherwise, poll the mapped port directly. Both paths run until the
+# overall deadline, so slow first boots (runtime installations) are covered.
+echo "[INFO] Waiting up to ${CHECK_MAX_WAIT}s for the service to become ready (poll ${CHECK_SLEEP}s)"
+has_health=$(docker inspect -f '{{.State.Health.Status}}' ${CONTAINER_NAME} 2>/dev/null)
+use_health=true
+if [ -z "${has_health}" ] || [ "${has_health}" == "<no value>" ]; then
+    use_health=false
+    echo "[INFO] Image has no HEALTHCHECK: falling back to direct HTTP polls"
+fi
 
-while [ $status_srv -gt 0 ] && [ $itry -le $max_try ];
+start_ts=$SECONDS
+ready=false
+while [ "$ready" == false ];
 do
-   sleep $sleep_time
-   response=$(curl http://localhost:${HOST_PORT})
-   status_srv=$?
-   let itry=itry+1
+    elapsed=$((SECONDS - start_ts))
+    if [ ${elapsed} -ge ${CHECK_MAX_WAIT} ]; then
+        echo "======="
+        echo "[ERROR] Service is not ready after ${elapsed}s (max ${CHECK_MAX_WAIT}s). Exiting..."
+        remove_container
+        exit 1
+    fi
+    sleep $sleep_time
+    if [ "$use_health" == true ]; then
+        health=$(docker inspect -f '{{.State.Health.Status}}' ${CONTAINER_NAME} 2>/dev/null)
+        echo "[INFO] Container health status (t=${elapsed}s): ${health}"
+        [ "${health}" == "healthy" ] && ready=true
+    else
+        if curl -fsS --max-time 10 -o /dev/null http://localhost:${HOST_PORT} 2>/dev/null; then
+            ready=true
+            echo "[INFO] Service answered after ${elapsed}s"
+        else
+            echo "[INFO] Service is not ready yet (${elapsed}s elapsed)"
+        fi
+    fi
 done
 
-if [ $status_srv -eq 0 ]; then
-    echo "[OK] Service at http://localhost:${HOST_PORT} is accessible"
+# Verify the service gives a valid HTTP answer (any code counts, as the
+# root path may legitimately answer 4xx/5xx; only silence is a failure)
+http_code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://localhost:${HOST_PORT})
+if [ -n "${http_code}" ] && [ "${http_code}" != "000" ]; then
+    echo "[OK] Service at http://localhost:${HOST_PORT} responds with HTTP code ${http_code}"
+    status_srv=0
 else
-    echo "[ERROR] Service at http://localhost:${HOST_PORT} is NOT accessible"
+    echo "[ERROR] Service at http://localhost:${HOST_PORT} did NOT give a valid HTTP response"
+    status_srv=1
 fi
 status=$status_srv
 
